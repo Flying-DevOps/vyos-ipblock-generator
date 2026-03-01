@@ -11,6 +11,7 @@ import ipaddress
 import logging
 import os
 import re
+import socket
 import subprocess  # nosec B404 - subprocess usage is intentional and controlled
 import tempfile
 import time
@@ -165,6 +166,29 @@ class BlocklistGenerator:
             self.logger.error(error_msg)
             raise APIFetchError(error_msg) from e
 
+    def _resolve_domain_to_ips(self, domain: str) -> list:
+        """
+        Resolve a domain name to all IP addresses (IPv4 and IPv6).
+
+        Args:
+            domain: Domain name to resolve
+
+        Returns:
+            List of IP address strings (may be empty if resolution fails)
+        """
+        ips = set()
+        try:
+            for result in socket.getaddrinfo(domain, None):
+                ip = result[4][0]
+                ips.add(ip)
+            if ips:
+                self.logger.debug(f"Resolved domain {domain} to {sorted(ips)}")
+        except socket.gaierror as e:
+            self.logger.warning(f"Failed to resolve domain {domain}: {e}")
+        except Exception as e:
+            self.logger.warning(f"Error resolving domain {domain}: {e}")
+        return sorted(ips)
+
     def _is_valid_ip_or_cidr(self, line: str) -> Tuple[bool, str]:
         """
         Validate if a line contains a valid IP address or CIDR block.
@@ -201,9 +225,10 @@ class BlocklistGenerator:
     def _filter_lines(self, data: str) -> Tuple[List[str], List[str]]:
         """
         Filter and validate IP addresses and CIDR blocks from text data.
+        Also resolves domain names to all IP addresses.
 
         Args:
-            data: Raw text data containing IP addresses/CIDR blocks
+            data: Raw text data containing IP addresses/CIDR blocks/domains
 
         Returns:
             Tuple of (ipv4_list, ipv6_list) containing valid addresses
@@ -224,6 +249,23 @@ class BlocklistGenerator:
                 continue
 
             is_valid, ip_version = self._is_valid_ip_or_cidr(line)
+
+            # If not a valid IP/CIDR, try resolving as domain
+            if not is_valid:
+                # Check if it looks like a domain (contains dots and valid domain chars)
+                if re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$", line):
+                    resolved_ips = self._resolve_domain_to_ips(line)
+                    for resolved_ip in resolved_ips:
+                        valid, version = self._is_valid_ip_or_cidr(resolved_ip)
+                        if valid:
+                            if version == "ipv4":
+                                ipv4_lines.append(resolved_ip)
+                            elif version == "ipv6":
+                                ipv6_lines.append(resolved_ip)
+                    if not resolved_ips:
+                        invalid_count += 1
+                        self.logger.debug(f"Line {line_num}: Domain {line} could not be resolved")
+                    continue
             if is_valid:
                 if ip_version == "ipv4":
                     ipv4_lines.append(line)
@@ -231,8 +273,7 @@ class BlocklistGenerator:
                     ipv6_lines.append(line)
             else:
                 invalid_count += 1
-                self.logger.debug(f"Line {line_num}: Invalid IP/CIDR ignored: {line}")
-
+                self.logger.debug(f"Line {line_num}: Invalid IP/CIDR/domain ignored: {line}")
         if invalid_count > 0:
             self.logger.debug(f"Filtered out {invalid_count} invalid entries")
 

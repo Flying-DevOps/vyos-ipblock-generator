@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
 
     steps:
     - name: Checkout code
@@ -96,7 +96,7 @@ jobs:
         # Test with minimal data
         generator = generate_blocklist.BlocklistGenerator(dry_run=True, verbose=True)
 
-        # Test line filtering
+        # Test line filtering with IPs and invalid entries
         test_data = '''
         # This is a comment
         192.168.1.1
@@ -109,6 +109,36 @@ jobs:
         total_filtered = len(ipv4_filtered) + len(ipv6_filtered)
         assert total_filtered == 3, f'Expected 3 valid IPs, got {total_filtered}'
         print(f'Line filtering test passed: {ipv4_filtered}, {ipv6_filtered}')
+
+        # Test line filtering with domain resolution
+        test_data_with_domains = '''
+        # IP addresses
+        192.168.1.1
+        10.0.0.0/8
+        
+        # Domains (will be resolved or skipped if DNS unavailable)
+        localhost
+        google.com
+        
+        # Invalid entries
+        invalid-ip-format
+        '''
+        ipv4_domains, ipv6_domains = generator._filter_lines(test_data_with_domains)
+        total_with_domains = len(ipv4_domains) + len(ipv6_domains)
+        # Should have at least the 2 manual IPs, domains may resolve depending on DNS
+        assert total_with_domains >= 2, f'Expected at least 2 valid entries, got {total_with_domains}'
+        print(f'Domain resolution test passed: IPv4={ipv4_domains}, IPv6={ipv6_domains}')
+        
+        # Verify specific domain resolution
+        print('\nTesting specific domain resolution...')
+        google_ips = generator._resolve_domain_to_ips('google.com')
+        assert google_ips, 'google.com should resolve to at least one IP address'
+        print(f'✓ google.com resolved to: {google_ips}')
+        
+        # Verify localhost resolution
+        localhost_ips = generator._resolve_domain_to_ips('localhost')
+        assert any(ip in ['127.0.0.1', '::1'] for ip in localhost_ips), f'localhost should resolve to 127.0.0.1 or ::1, got {localhost_ips}'
+        print(f'✓ localhost resolved to: {localhost_ips}')
 
         # Test CIDR conversion
         cidr_list_v4 = generator._convert_to_cidr_v4(ipv4_filtered)
@@ -262,6 +292,38 @@ jobs:
         total_empty = len(empty_ipv4) + len(empty_ipv6)
         assert total_empty == 0, 'Empty data should return empty lists'
         print('Empty data handling test passed')
+
+        # Test domain resolution error handling
+        print('\nTesting domain resolution error handling...')
+        
+        # Test valid domain resolution with google.com
+        google_ips = generator._resolve_domain_to_ips('google.com')
+        assert google_ips, 'google.com should resolve successfully'
+        import ipaddress
+        for ip in google_ips:
+            try:
+                ipaddress.ip_address(ip)
+                print(f'✓ google.com resolved to valid IP: {ip}')
+            except ValueError:
+                assert False, f'google.com resolved to invalid IP: {ip}'
+        
+        # Test with unreachable domain
+        unreachable_ips = generator._resolve_domain_to_ips('definitely-not-a-real-domain-99999.invalid')
+        assert not unreachable_ips, f'Expected no IPs for unreachable domain, got {unreachable_ips}'
+        print('Unreachable domain handling test passed')
+        
+        # Test mixed valid domains and IPs
+        mixed_valid = '''
+        192.168.1.1
+        google.com
+        10.0.0.0/8
+        localhost
+        '''
+        mixed_ipv4, mixed_ipv6 = generator._filter_lines(mixed_valid)
+        mixed_total = len(mixed_ipv4) + len(mixed_ipv6)
+        # Should have at least 2 IPs + google.com + localhost
+        assert mixed_total >= 3, f'Expected at least 3 entries from mixed valid data, got {mixed_total}'
+        print(f'✓ Mixed valid domain/IP test passed: {mixed_total} entries')
 
         # Test with unreachable URL (should be handled gracefully in dry-run)
         try:

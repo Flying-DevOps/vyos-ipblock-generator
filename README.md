@@ -13,6 +13,7 @@ A professional-grade IP blocklist generator for VyOS that automatically fetches,
 - **Emerging Threats**: Community-driven threat intelligence
 - **Binary Defense**: Professional threat feeds
 - **AbuseIPDB**: Crowd-sourced IP abuse database
+- **DNS/Domain Support**: Domains in whitelist/blocklist are automatically resolved to all IP addresses (IPv4 and IPv6)
 - **Smart Deduplication**: Automatically removes redundant CIDR blocks
 - **CIDR Optimization**: Merges overlapping ranges for efficiency
 - **Dual-Stack Support**: Full IPv4 and IPv6 processing
@@ -72,7 +73,7 @@ chmod +x generate_blocklist.py
 
 ### Whitelist Configuration
 
-Protect your own networks from being blocked (supports both IPv4 and IPv6):
+Protect your own networks from being blocked (supports both IPv4 and IPv6, and domain names):
 
 ```bash
 # Edit the whitelist file
@@ -98,9 +99,13 @@ Example whitelist configuration:
 2001:db8::/32
 fd00::/8
 2001:4860:4860::8888/128
+
+# Domains (will be resolved to all IPs)
+google.com
+example.com
 ```
 
-**Important**: Any IP or subnet that falls within a whitelisted CIDR block will be automatically excluded from blocking. Both IPv4 and IPv6 networks are supported.
+**Important**: Any IP, subnet, or domain that falls within a whitelisted CIDR block will be automatically excluded from blocking. Both IPv4, IPv6 networks, and domain names are supported.
 
 ### AbuseIPDB API Key (Optional)
 

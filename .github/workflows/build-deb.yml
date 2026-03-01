@@ -170,6 +170,20 @@ jobs:
         echo "# Enable automatic updates every 6 hours" >> package-info.md
         echo "sudo systemctl enable --now vyos-ipblock.timer" >> package-info.md
         echo "\`\`\`" >> package-info.md
+        echo "" >> package-info.md
+        echo "### DNS/Domain Resolution Example" >> package-info.md
+        echo "You can add domain names to your whitelist or blocklist. The tool will automatically resolve all IP addresses (IPv4 and IPv6) for each domain." >> package-info.md
+        echo "" >> package-info.md
+        echo "#### Example whitelist.txt" >> package-info.md
+        echo "\"\"\"" >> package-info.md
+        echo "# Internal networks" >> package-info.md
+        echo "10.0.0.0/8" >> package-info.md
+        echo "# Domains (will be resolved to all IPs)" >> package-info.md
+        echo "google.com" >> package-info.md
+        echo "example.com" >> package-info.md
+        echo "\"\"\"" >> package-info.md
+        echo "" >> package-info.md
+        echo "When you run vyos-ipblock, all IPs for these domains will be included automatically." >> package-info.md
 
     - name: Copy package to workspace
       run: |
