@@ -155,6 +155,257 @@ jobs:
         print(f'Deduplication test passed: {total_deduplicated} entries')
         "
 
+  test-ip-deduplication:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Test IPv4 exact duplicate removal
+      run: |
+        python -c "
+        import generate_blocklist
+        import ipaddress
+
+        generator = generate_blocklist.BlocklistGenerator(dry_run=True)
+
+        # Create list with exact duplicates
+        cidr_list = [
+            ipaddress.IPv4Network('192.168.1.0/24'),
+            ipaddress.IPv4Network('10.0.0.0/8'),
+            ipaddress.IPv4Network('192.168.1.0/24'),  # Duplicate
+            ipaddress.IPv4Network('172.16.0.0/12'),
+            ipaddress.IPv4Network('10.0.0.0/8'),      # Duplicate
+            ipaddress.IPv4Network('192.168.1.0/24'),  # Another duplicate
+        ]
+
+        deduplicated = generator._deduplicate_and_filter_list_v4(cidr_list)
+        
+        # Should have 3 unique CIDR blocks (duplicates removed)
+        assert len(deduplicated) == 3, f'Expected 3 unique entries, got {len(deduplicated)}'
+        
+        # Verify the correct entries are present
+        unique_cidrs = {str(cidr) for cidr in deduplicated}
+        expected = {'192.168.1.0/24', '10.0.0.0/8', '172.16.0.0/12'}
+        assert unique_cidrs == expected, f'Expected {expected}, got {unique_cidrs}'
+        
+        print(f'✓ IPv4 exact duplicate removal test passed')
+        print(f'  Input: 6 entries (3 duplicates)')
+        print(f'  Output: 3 unique entries')
+        print(f'  Entries: {unique_cidrs}')
+        "
+
+    - name: Test IPv6 exact duplicate removal
+      run: |
+        python -c "
+        import generate_blocklist
+        import ipaddress
+
+        generator = generate_blocklist.BlocklistGenerator(dry_run=True)
+
+        # Create list with exact duplicates (independent networks)
+        cidr_list = [
+            ipaddress.IPv6Network('2001:db8::/32'),
+            ipaddress.IPv6Network('2001:db9::/32'),
+            ipaddress.IPv6Network('2001:db8::/32'),      # Duplicate
+            ipaddress.IPv6Network('2001:dbA::/32'),
+            ipaddress.IPv6Network('2001:db9::/32'),      # Duplicate
+        ]
+
+        deduplicated = generator._deduplicate_and_filter_list_v6(cidr_list)
+        
+        # Should have 3 unique CIDR blocks (exact duplicates removed)
+        assert len(deduplicated) == 3, f'Expected 3 unique entries, got {len(deduplicated)}'
+        
+        # Verify the correct entries are present
+        unique_cidrs = {str(cidr) for cidr in deduplicated}
+        expected = {'2001:db8::/32', '2001:db9::/32', '2001:dba::/32'}
+        assert unique_cidrs == expected, f'Expected {expected}, got {unique_cidrs}'
+        
+        print(f'✓ IPv6 exact duplicate removal test passed')
+        print(f'  Input: 5 entries (2 duplicates)')
+        print(f'  Output: 3 unique entries')
+        print(f'  Entries: {unique_cidrs}')
+        "
+
+    - name: Test IPv4 redundant CIDR filtering
+      run: |
+        python -c "
+        import generate_blocklist
+        import ipaddress
+
+        generator = generate_blocklist.BlocklistGenerator(dry_run=True)
+
+        # Create list with redundant (overlapping) CIDR blocks
+        cidr_list = [
+            ipaddress.IPv4Network('10.0.0.0/8'),        # Supernet
+            ipaddress.IPv4Network('10.1.0.0/16'),       # Subnet of 10.0.0.0/8
+            ipaddress.IPv4Network('10.1.1.0/24'),       # Subnet of 10.1.0.0/16
+            ipaddress.IPv4Network('192.168.0.0/16'),    # Supernet
+            ipaddress.IPv4Network('192.168.1.0/24'),    # Subnet of 192.168.0.0/16
+        ]
+
+        deduplicated = generator._deduplicate_and_filter_list_v4(cidr_list)
+        
+        # Should have 2 entries (the supernets, smaller subnets are redundant)
+        assert len(deduplicated) == 2, f'Expected 2 entries after redundancy filtering, got {len(deduplicated)}'
+        
+        # Verify that only supernets remain
+        unique_cidrs = {str(cidr) for cidr in deduplicated}
+        expected = {'10.0.0.0/8', '192.168.0.0/16'}
+        assert unique_cidrs == expected, f'Expected {expected}, got {unique_cidrs}'
+        
+        print(f'✓ IPv4 redundant CIDR filtering test passed')
+        print(f'  Input: 5 entries (3 redundant subnets)')
+        print(f'  Output: 2 entries (only supernets)')
+        print(f'  Entries: {unique_cidrs}')
+        "
+
+    - name: Test IPv6 redundant CIDR filtering
+      run: |
+        python -c "
+        import generate_blocklist
+        import ipaddress
+
+        generator = generate_blocklist.BlocklistGenerator(dry_run=True)
+
+        # Create list with redundant (overlapping) CIDR blocks
+        cidr_list = [
+            ipaddress.IPv6Network('2001:db8::/32'),     # Supernet
+            ipaddress.IPv6Network('2001:db8:1::/48'),   # Subnet of 2001:db8::/32
+            ipaddress.IPv6Network('2001:db8:1:1::/64'), # Subnet of 2001:db8:1::/48
+            ipaddress.IPv6Network('2001:db9::/32'),     # Independent supernet
+            ipaddress.IPv6Network('2001:db9:1::/48'),   # Subnet of 2001:db9::/32
+        ]
+
+        deduplicated = generator._deduplicate_and_filter_list_v6(cidr_list)
+        
+        # Should have 2 entries (supernets only; subnets removed as redundant)
+        assert len(deduplicated) == 2, f'Expected 2 entries after redundancy filtering, got {len(deduplicated)}'
+        
+        # Verify the correct entries (the supernets)
+        unique_cidrs = {str(cidr) for cidr in deduplicated}
+        expected = {'2001:db8::/32', '2001:db9::/32'}
+        assert unique_cidrs == expected, f'Expected {expected}, got {unique_cidrs}'
+        
+        print(f'✓ IPv6 redundant CIDR filtering test passed')
+        print(f'  Input: 5 entries (3 redundant subnets)')
+        print(f'  Output: 2 entries (supernets only)')
+        print(f'  Entries: {unique_cidrs}')
+        "
+
+    - name: Test mixed IPv4 duplicates and redundancy
+      run: |
+        python -c "
+        import generate_blocklist
+        import ipaddress
+
+        generator = generate_blocklist.BlocklistGenerator(dry_run=True)
+
+        # Create list with both exact duplicates AND redundant blocks
+        cidr_list = [
+            ipaddress.IPv4Network('192.168.0.0/16'),
+            ipaddress.IPv4Network('192.168.1.0/24'),
+            ipaddress.IPv4Network('192.168.0.0/16'),    # Exact duplicate
+            ipaddress.IPv4Network('10.0.0.0/8'),
+            ipaddress.IPv4Network('192.168.1.0/24'),    # Exact duplicate
+            ipaddress.IPv4Network('10.1.0.0/16'),       # Redundant (subnet of 10.0.0.0/8)
+            ipaddress.IPv4Network('172.16.0.0/12'),
+        ]
+
+        deduplicated = generator._deduplicate_and_filter_list_v4(cidr_list)
+        
+        # Should have 4 entries:
+        # - 192.168.0.0/16 (supernet, removes 192.168.1.0/24 as redundant)
+        # - 10.0.0.0/8 (supernet, removes 10.1.0.0/16 as redundant)
+        # - 172.16.0.0/12
+        assert len(deduplicated) == 3, f'Expected 3 entries, got {len(deduplicated)}'
+        
+        unique_cidrs = {str(cidr) for cidr in deduplicated}
+        expected = {'192.168.0.0/16', '10.0.0.0/8', '172.16.0.0/12'}
+        assert unique_cidrs == expected, f'Expected {expected}, got {unique_cidrs}'
+        
+        print(f'✓ Mixed IPv4 duplicates and redundancy test passed')
+        print(f'  Input: 7 entries (2 exact duplicates, 2 redundant subnets)')
+        print(f'  Output: 3 entries')
+        print(f'  Entries: {unique_cidrs}')
+        "
+
+    - name: Test IPv4 deduplication performance with large dataset
+      run: |
+        python -c "
+        import generate_blocklist
+        import ipaddress
+        import time
+
+        generator = generate_blocklist.BlocklistGenerator(dry_run=True, verbose=False)
+
+        # Create a large list with many duplicates (simulating real-world scenario)
+        base_networks = [
+            ipaddress.IPv4Network('10.0.0.0/8'),
+            ipaddress.IPv4Network('192.168.0.0/16'),
+            ipaddress.IPv4Network('172.16.0.0/12'),
+            ipaddress.IPv4Network('203.0.113.0/24'),
+        ]
+
+        # Repeat each network multiple times to simulate duplicates
+        cidr_list = []
+        for _ in range(100):
+            cidr_list.extend(base_networks)
+
+        assert len(cidr_list) == 400, 'Should have 400 entries initially'
+
+        start_time = time.time()
+        deduplicated = generator._deduplicate_and_filter_list_v4(cidr_list)
+        elapsed_time = time.time() - start_time
+
+        # Should have 4 unique entries
+        assert len(deduplicated) == 4, f'Expected 4 unique entries, got {len(deduplicated)}'
+        
+        print(f'✓ IPv4 deduplication performance test passed')
+        print(f'  Input: 400 entries (4 unique, 100x repetition)')
+        print(f'  Output: 4 unique entries')
+        print(f'  Processing time: {elapsed_time:.4f} seconds')
+        "
+
+    - name: Test empty and single-entry lists
+      run: |
+        python -c "
+        import generate_blocklist
+        import ipaddress
+
+        generator = generate_blocklist.BlocklistGenerator(dry_run=True)
+
+        # Test empty list
+        empty_v4 = generator._deduplicate_and_filter_list_v4([])
+        assert len(empty_v4) == 0, 'Empty list should return empty'
+        print('✓ Empty list test passed')
+
+        # Test single entry
+        single_entry = [ipaddress.IPv4Network('192.168.1.0/24')]
+        deduplicated = generator._deduplicate_and_filter_list_v4(single_entry)
+        assert len(deduplicated) == 1, 'Single entry should remain'
+        assert str(deduplicated[0]) == '192.168.1.0/24'
+        print('✓ Single entry test passed')
+
+        # Test empty IPv6 list
+        empty_v6 = generator._deduplicate_and_filter_list_v6([])
+        assert len(empty_v6) == 0, 'Empty IPv6 list should return empty'
+        print('✓ Empty IPv6 list test passed')
+        "
+
+
+
   test-network-connectivity:
     runs-on: ubuntu-latest
     steps:
@@ -348,7 +599,7 @@ jobs:
 
   test-integration:
     runs-on: ubuntu-latest
-    needs: [test, test-network-connectivity, test-error-conditions]
+    needs: [test, test-network-connectivity, test-error-conditions, test-ip-deduplication]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

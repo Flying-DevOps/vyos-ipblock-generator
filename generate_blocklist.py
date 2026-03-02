@@ -417,7 +417,15 @@ class BlocklistGenerator:
         )
         original_count = len(cidr_list)
 
-        # Sort by network address and prefix length
+        # First, remove exact duplicates using a set (O(n) instead of O(n²))
+        unique_cidrs: set = set(cidr_list)
+        if len(unique_cidrs) < len(cidr_list):
+            self.logger.debug(
+                f"Removed {len(cidr_list) - len(unique_cidrs)} exact duplicate entries"
+            )
+
+        # Convert back to list and sort by network address and prefix length
+        cidr_list = list(unique_cidrs)
         cidr_list.sort(key=lambda x: (x.network_address, x.prefixlen))
 
         # Remove networks contained within larger blocks
@@ -441,7 +449,15 @@ class BlocklistGenerator:
         )
         original_count = len(cidr_list)
 
-        # Sort by network address and prefix length
+        # First, remove exact duplicates using a set (O(n) instead of O(n²))
+        unique_cidrs: set = set(cidr_list)
+        if len(unique_cidrs) < len(cidr_list):
+            self.logger.debug(
+                f"Removed {len(cidr_list) - len(unique_cidrs)} exact duplicate entries"
+            )
+
+        # Convert back to list and sort by network address and prefix length
+        cidr_list = list(unique_cidrs)
         cidr_list.sort(key=lambda x: (x.network_address, x.prefixlen))
 
         # Remove networks contained within larger blocks
@@ -846,7 +862,7 @@ table ip6 {self.config.NFT_TABLE} {{
 
         self.logger.info(f"Applying nftables rule file: {filename}")
 
-        # Validate filename to prevent path traversal
+        # Validate filename to prevent path traversalis the
         if not os.path.abspath(filename).startswith(tempfile.gettempdir()):
             raise NFTConfigError("Invalid nftables rule file path")
 
